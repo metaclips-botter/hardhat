@@ -1,0 +1,86 @@
+// SPDX-License-Identifier: UNLICENSED
+pragma solidity ^0.8.0;
+
+// Import necessary interfaces and libraries
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
+import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Pair.sol";
+
+contract SwapContract {
+    address public owner;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    receive() external payable {}
+
+    // Perform a swap from tokenIn to tokenOut
+    function swap(
+        address routerAddress,
+        address[] memory path,
+        uint256 amountIn,
+        uint256 expectedAmountOutMin,
+        int256 slippageAllowance
+    ) external {
+        require(path.length >= 2, "Path has to be >=2");
+        require(slippageAllowance <= 0, "Slippage allowance should be <=0");
+
+        // Ensure the contract has the required tokens
+        require(
+            IERC20(path[0]).balanceOf(address(this)) >= amountIn,
+            "Insufficient balance of path[0]"
+        );
+
+        IUniswapV2Router02 dexRouter = IUniswapV2Router02(routerAddress);
+
+        uint[] memory amountsOutMin = dexRouter.getAmountsOut(amountIn, path);
+
+        // Check if the amountGotten minus amount expected is greater than
+        int256 divergence = int256(amountsOutMin[amountsOutMin.length - 1]) -
+            int256(expectedAmountOutMin);
+        // I am allowed to lose -10
+        // I gain 15
+        // 15 > -10, so it won't fire
+        // I lose -15
+        // -15 < -10 so it'll fire
+        if (divergence < slippageAllowance) {
+            require(false, "AmountOutMin diverged by");
+        }
+
+        for (uint i = 0; i < path.length - 1; i++) {
+            bool approved = IERC20(path[i]).approve(
+                address(dexRouter),
+                type(uint256).max
+            );
+            require(approved, "Cryptocurrency not approved");
+        }
+
+        dexRouter.swapExactTokensForTokens(
+            amountIn,
+            0,
+            path,
+            address(this),
+            block.timestamp // Replace with an appropriate deadline
+        );
+    }
+
+    // Allow the owner to withdraw any remaining tokens from the contract
+    function withdrawTokens(address token, uint256 amount) external {
+        require(msg.sender == owner, "Only owner can withdraw");
+        IERC20(token).transfer(owner, amount);
+    }
+
+    function approveTokens(address token, uint256 amount) external {
+        require(msg.sender == owner, "Only owner can approve");
+        IERC20(token).approve(token, amount);
+    }
+
+    function sendMoney(address payable recipient, uint256 amount) external {
+        require(msg.sender == owner, "Only the owner can send Ether");
+        require(address(this).balance >= amount, "Not enough balance");
+
+        recipient.transfer(amount);
+    }
+}
